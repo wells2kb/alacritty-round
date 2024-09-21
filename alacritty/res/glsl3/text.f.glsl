@@ -7,10 +7,10 @@
 #define vec3_t mediump vec3
 #define texture texture2D
 
-varying mediump vec2 TexCoords;
-varying mediump vec3 fg;
-varying highp float colored;
-varying mediump vec4 bg;
+varying lowp vec2 TexCoords;
+varying lowp vec3 fg;
+varying lowp float colored;
+varying lowp vec4 bg;
 
 #define FRAG_COLOR gl_FragColor
 #define ALPHA_MASK gl_SecondaryFragColorEXT

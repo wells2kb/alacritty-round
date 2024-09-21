@@ -49,7 +49,7 @@ use crate::display::meter::Meter;
 use crate::display::window::Window;
 use crate::event::{Event, EventType, Mouse, SearchState};
 use crate::message_bar::{MessageBuffer, MessageType};
-use crate::renderer::rects::{RenderLine, RenderLines, RenderRect};
+use crate::renderer::rects::{RenderLine, RenderLines, RenderRect, RectKind};
 use crate::renderer::{self, GlyphCache, Renderer};
 use crate::scheduler::{Scheduler, TimerId, Topic};
 use crate::string::{ShortenDirection, StrShortener};
@@ -789,7 +789,7 @@ impl Display {
         let has_highlighted_hint =
             self.highlighted_hint.is_some() || self.vi_highlighted_hint.is_some();
 
-        // Draw grid.
+        // Draw text grid.
         {
             let _sampler = self.meter.sampler();
 
@@ -802,35 +802,50 @@ impl Display {
             let vi_highlighted_hint = &self.vi_highlighted_hint;
             let damage_tracker = &mut self.damage_tracker;
 
+            grid_cells = grid_cells.into_iter().map(|mut cell| {
+                // Underline hints hovered by mouse or vi mode cursor.
+                let point = term::viewport_to_point(display_offset, cell.point);
+
+                if has_highlighted_hint {
+                    let hyperlink =
+                        cell.extra.as_ref().and_then(|extra| extra.hyperlink.as_ref());
+                    if highlighted_hint
+                        .as_ref()
+                        .map_or(false, |hint| hint.should_highlight(point, hyperlink))
+                        || vi_highlighted_hint
+                            .as_ref()
+                            .map_or(false, |hint| hint.should_highlight(point, hyperlink))
+                    {
+                        cell.flags.insert(Flags::UNDERLINE);
+                        // Damage hints for the current and next frames.
+                        damage_tracker.frame().damage_point(cell.point);
+                        damage_tracker.next_frame().damage_point(cell.point);
+                    }
+                }
+
+                // Update underline/strikeout.
+                lines.update(&cell);
+
+                cell
+            }).collect();
+
+            {
+                let backgrounds = {
+                    lines.rects(&metrics, &size_info)
+                        .iter()
+                        .filter(|rect| {
+                            rect.kind == RectKind::Undercurl
+                        })
+                        .map(|&rect| rect)
+                        .collect()
+                };
+                self.renderer.draw_rects(&size_info, &metrics, backgrounds);
+            }
+
             self.renderer.draw_cells(
                 &size_info,
                 glyph_cache,
-                grid_cells.into_iter().map(|mut cell| {
-                    // Underline hints hovered by mouse or vi mode cursor.
-                    let point = term::viewport_to_point(display_offset, cell.point);
-
-                    if has_highlighted_hint {
-                        let hyperlink =
-                            cell.extra.as_ref().and_then(|extra| extra.hyperlink.as_ref());
-                        if highlighted_hint
-                            .as_ref()
-                            .map_or(false, |hint| hint.should_highlight(point, hyperlink))
-                            || vi_highlighted_hint
-                                .as_ref()
-                                .map_or(false, |hint| hint.should_highlight(point, hyperlink))
-                        {
-                            cell.flags.insert(Flags::UNDERLINE);
-                            // Damage hints for the current and next frames.
-                            damage_tracker.frame().damage_point(cell.point);
-                            damage_tracker.next_frame().damage_point(cell.point);
-                        }
-                    }
-
-                    // Update underline/strikeout.
-                    lines.update(&cell);
-
-                    cell
-                }),
+                grid_cells.into_iter().map(|cell| cell),
             );
         }
 
@@ -912,6 +927,10 @@ impl Display {
             }
         }
 
+        // Draw rectangles.
+        // self.renderer.draw_rects(&size_info, &metrics, rects);
+
+        // Print error or warning message to screen.
         if let Some(message) = message_buffer.message() {
             let search_offset = usize::from(search_state.regex().is_some());
             let text = message.text(&size_info);
@@ -928,17 +947,9 @@ impl Display {
             let x = 0;
             let width = size_info.width() as i32;
             let height = (size_info.height() - y) as i32;
-            let message_bar_rect =
-                RenderRect::new(x as f32, y, width as f32, height as f32, bg, 1.);
-
-            // Push message_bar in the end, so it'll be above all other content.
-            rects.push(message_bar_rect);
 
             // Always damage message bar, since it could have messages of the same size in it.
             self.damage_tracker.frame().add_viewport_rect(&size_info, x, y as i32, width, height);
-
-            // Draw rectangles.
-            self.renderer.draw_rects(&size_info, &metrics, rects);
 
             // Relay messages to the user.
             let glyph_cache = &mut self.glyph_cache;
@@ -954,9 +965,6 @@ impl Display {
                     glyph_cache,
                 );
             }
-        } else {
-            // Draw rectangles.
-            self.renderer.draw_rects(&size_info, &metrics, rects);
         }
 
         self.draw_render_timer(config);

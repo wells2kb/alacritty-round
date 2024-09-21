@@ -30,7 +30,7 @@ pub struct RenderRect {
 
 impl RenderRect {
     pub fn new(x: f32, y: f32, width: f32, height: f32, color: Rgb, alpha: f32) -> Self {
-        RenderRect { kind: RectKind::Normal, x, y, width, height, color, alpha }
+        RenderRect { kind: RectKind::Underline, x, y, width, height, color, alpha }
     }
 }
 
@@ -45,11 +45,12 @@ pub struct RenderLine {
 #[repr(u8)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum RectKind {
-    Normal = 0,
-    Undercurl = 1,
-    DottedUnderline = 2,
-    DashedUnderline = 3,
-    NumKinds = 4,
+    Background = 0,
+    Underline = 1,
+    Undercurl = 2,
+    UnderDotted = 3,
+    UnderDashed = 4,
+    NumKinds = 5,
 }
 
 impl RenderLine {
@@ -93,22 +94,22 @@ impl RenderLine {
                     color,
                 ));
 
-                (bottom_pos, metrics.underline_thickness, RectKind::Normal)
+                (bottom_pos, metrics.underline_thickness, RectKind::Underline)
             },
             // Make undercurl occupy the entire descent area.
             Flags::UNDERCURL => (metrics.descent, metrics.descent.abs(), RectKind::Undercurl),
             Flags::UNDERLINE => {
-                (metrics.underline_position, metrics.underline_thickness, RectKind::Normal)
+                (metrics.underline_position, metrics.underline_thickness, RectKind::Underline)
             },
             // Make dotted occupy the entire descent area.
             Flags::DOTTED_UNDERLINE => {
-                (metrics.descent, metrics.descent.abs(), RectKind::DottedUnderline)
+                (metrics.descent, metrics.descent.abs(), RectKind::UnderDotted)
             },
             Flags::DASHED_UNDERLINE => {
-                (metrics.underline_position, metrics.underline_thickness, RectKind::DashedUnderline)
+                (metrics.underline_position, metrics.underline_thickness, RectKind::UnderDashed)
             },
             Flags::STRIKEOUT => {
-                (metrics.strikeout_position, metrics.strikeout_thickness, RectKind::Normal)
+                (metrics.strikeout_position, metrics.strikeout_thickness, RectKind::Underline)
             },
             _ => unimplemented!("Invalid flag for cell line drawing specified"),
         };
@@ -251,8 +252,8 @@ pub struct RectRenderer {
     vao: GLuint,
     vbo: GLuint,
 
-    programs: [RectShaderProgram; 4],
-    vertices: [Vec<Vertex>; 4],
+    programs: [RectShaderProgram; RectKind::NumKinds as usize],
+    vertices: [Vec<Vertex>; RectKind::NumKinds as usize],
 }
 
 impl RectRenderer {
@@ -260,19 +261,20 @@ impl RectRenderer {
         let mut vao: GLuint = 0;
         let mut vbo: GLuint = 0;
 
-        let rect_program = RectShaderProgram::new(shader_version, RectKind::Normal)?;
-        let undercurl_program = RectShaderProgram::new(shader_version, RectKind::Undercurl)?;
+        let background_program = RectShaderProgram::new(shader_version, RectKind::Background)?;
+        let under_line_program = RectShaderProgram::new(shader_version, RectKind::Underline)?;
+        let under_curl_program = RectShaderProgram::new(shader_version, RectKind::Undercurl)?;
         // This shader has way more ALU operations than other rect shaders, so use a fallback
         // to underline just for it when we can't compile it.
-        let dotted_program = match RectShaderProgram::new(shader_version, RectKind::DottedUnderline)
+        let under_dotted_program = match RectShaderProgram::new(shader_version, RectKind::UnderDotted)
         {
-            Ok(dotted_program) => dotted_program,
+            Ok(under_dotted_program) => under_dotted_program,
             Err(err) => {
                 info!("Error compiling dotted shader: {err}\n  falling back to underline");
-                RectShaderProgram::new(shader_version, RectKind::Normal)?
+                RectShaderProgram::new(shader_version, RectKind::Underline)?
             },
         };
-        let dashed_program = RectShaderProgram::new(shader_version, RectKind::DashedUnderline)?;
+        let under_dashed_program = RectShaderProgram::new(shader_version, RectKind::UnderDashed)?;
 
         unsafe {
             // Allocate buffers.
@@ -314,7 +316,13 @@ impl RectRenderer {
             gl::BindBuffer(gl::ARRAY_BUFFER, 0);
         }
 
-        let programs = [rect_program, undercurl_program, dotted_program, dashed_program];
+        let programs = [
+            background_program,
+            under_line_program,
+            under_curl_program,
+            under_dotted_program,
+            under_dashed_program,
+        ];
         Ok(Self { vao, vbo, programs, vertices: Default::default() })
     }
 
@@ -339,7 +347,7 @@ impl RectRenderer {
         unsafe {
             // We iterate in reverse order to draw plain rects at the end, since we want visual
             // bell or damage rects be above the lines.
-            for rect_kind in (RectKind::Normal as u8..RectKind::NumKinds as u8).rev() {
+            for rect_kind in (RectKind::Underline as u8..RectKind::NumKinds as u8).rev() {
                 let vertices = &mut self.vertices[rect_kind as usize];
                 if vertices.is_empty() {
                     continue;
@@ -439,9 +447,11 @@ impl RectShaderProgram {
     pub fn new(shader_version: ShaderVersion, kind: RectKind) -> Result<Self, ShaderError> {
         // XXX: This must be in-sync with fragment shader defines.
         let header = match kind {
-            RectKind::Undercurl => Some("#define DRAW_UNDERCURL\n"),
-            RectKind::DottedUnderline => Some("#define DRAW_DOTTED\n"),
-            RectKind::DashedUnderline => Some("#define DRAW_DASHED\n"),
+            RectKind::Background => Some("#define DRAW_BACKGROUND\n"),
+            // RectKind::Undercurl => Some("#define DRAW_UNDER_CURL\n"),
+            RectKind::Undercurl => Some("#define DRAW_BACKGROUND\n"),
+            RectKind::UnderDotted => Some("#define DRAW_UNDER_DOTTED\n"),
+            RectKind::UnderDashed => Some("#define DRAW_UNDER_DASHED\n"),
             _ => None,
         };
         let program = ShaderProgram::new(shader_version, header, RECT_SHADER_V, RECT_SHADER_F)?;

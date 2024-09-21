@@ -28,8 +28,8 @@ uniform float_t undercurlPosition;
 
 #define PI 3.1415926538
 
-#if defined(DRAW_UNDERCURL)
-color_t draw_undercurl(float_t x, float_t y) {
+#if defined(DRAW_UNDER_CURL)
+color_t draw_under_curl(float_t x, float_t y) {
   // We use `undercurlPosition` as an amplitude, since it's half of the descent
   // value.
   //
@@ -58,10 +58,10 @@ color_t draw_undercurl(float_t x, float_t y) {
 }
 #endif
 
-#if defined(DRAW_DOTTED)
+#if defined(DRAW_UNDER_DOTTED)
 // When the dot size increases we can use AA to make spacing look even and the
 // dots rounded.
-color_t draw_dotted_aliased(float_t x, float_t y) {
+color_t draw_under_dotted_aliased(float_t x, float_t y) {
   float_t dotNumber = floor(x / underlineThickness);
 
   float_t radius = underlineThickness / 2.;
@@ -78,7 +78,7 @@ color_t draw_dotted_aliased(float_t x, float_t y) {
 }
 
 /// Draw dotted line when dot is just a single pixel.
-color_t draw_dotted(float_t x, float_t y) {
+color_t draw_under_dotted(float_t x, float_t y) {
   float_t cellEven = 0.;
 
   // Since the size of the dot and its gap combined is 2px we should ensure that
@@ -101,8 +101,8 @@ color_t draw_dotted(float_t x, float_t y) {
 }
 #endif
 
-#if defined(DRAW_DASHED)
-color_t draw_dashed(float_t x) {
+#if defined(DRAW_UNDER_DASHED)
+color_t draw_under_dashed(float_t x) {
   // Since dashes of adjacent cells connect with each other our dash length is
   // half of the desired total length.
   float_t halfDashLen = floor(cellWidth / 4. + 0.5);
@@ -122,16 +122,16 @@ void main() {
   float_t x = floor(mod(gl_FragCoord.x - paddingX, cellWidth));
   float_t y = floor(mod(gl_FragCoord.y - paddingY, cellHeight));
 
-#if defined(DRAW_UNDERCURL)
-  FRAG_COLOR = draw_undercurl(x, y);
-#elif defined(DRAW_DOTTED)
+#if defined(DRAW_UNDER_CURL)
+  FRAG_COLOR = draw_under_curl(x, y);
+#elif defined(DRAW_UNDER_DOTTED)
   if (underlineThickness < 2.) {
-    FRAG_COLOR = draw_dotted(x, y);
+    FRAG_COLOR = draw_under_dotted(x, y);
   } else {
-    FRAG_COLOR = draw_dotted_aliased(x, y);
+    FRAG_COLOR = draw_under_dotted_aliased(x, y);
   }
-#elif defined(DRAW_DASHED)
-  FRAG_COLOR = draw_dashed(x);
+#elif defined(DRAW_UNDER_DASHED)
+  FRAG_COLOR = draw_under_dashed(x);
 #else
   FRAG_COLOR = color;
 #endif
