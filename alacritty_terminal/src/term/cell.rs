@@ -33,6 +33,7 @@ bitflags! {
         const ALL_UNDERLINES            = Self::UNDERLINE.bits() | Self::DOUBLE_UNDERLINE.bits()
                                         | Self::UNDERCURL.bits() | Self::DOTTED_UNDERLINE.bits()
                                         | Self::DASHED_UNDERLINE.bits();
+        const ROUNDED_BACKGROUND        = 0b1000_0000_0000_0000;
     }
 }
 

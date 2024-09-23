@@ -45,11 +45,11 @@ pub struct RenderLine {
 #[repr(u8)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum RectKind {
-    Background = 0,
-    Underline = 1,
-    Undercurl = 2,
-    UnderDotted = 3,
-    UnderDashed = 4,
+    Underline = 0,
+    Undercurl = 1,
+    UnderDotted = 2,
+    UnderDashed = 3,
+    RoundedBg = 4,
     NumKinds = 5,
 }
 
@@ -111,6 +111,7 @@ impl RenderLine {
             Flags::STRIKEOUT => {
                 (metrics.strikeout_position, metrics.strikeout_thickness, RectKind::Underline)
             },
+            Flags::ROUNDED_BACKGROUND => (metrics.descent, size.cell_height(), RectKind::RoundedBg),
             _ => unimplemented!("Invalid flag for cell line drawing specified"),
         };
 
@@ -188,6 +189,7 @@ impl RenderLines {
         self.update_flag(cell, Flags::UNDERCURL);
         self.update_flag(cell, Flags::DOTTED_UNDERLINE);
         self.update_flag(cell, Flags::DASHED_UNDERLINE);
+        self.update_flag(cell, Flags::ROUNDED_BACKGROUND);
     }
 
     /// Update the lines for a specific flag.
@@ -261,7 +263,6 @@ impl RectRenderer {
         let mut vao: GLuint = 0;
         let mut vbo: GLuint = 0;
 
-        let background_program = RectShaderProgram::new(shader_version, RectKind::Background)?;
         let under_line_program = RectShaderProgram::new(shader_version, RectKind::Underline)?;
         let under_curl_program = RectShaderProgram::new(shader_version, RectKind::Undercurl)?;
         // This shader has way more ALU operations than other rect shaders, so use a fallback
@@ -275,6 +276,7 @@ impl RectRenderer {
             },
         };
         let under_dashed_program = RectShaderProgram::new(shader_version, RectKind::UnderDashed)?;
+        let rounded_background_program = RectShaderProgram::new(shader_version, RectKind::RoundedBg)?;
 
         unsafe {
             // Allocate buffers.
@@ -317,11 +319,11 @@ impl RectRenderer {
         }
 
         let programs = [
-            background_program,
             under_line_program,
             under_curl_program,
             under_dotted_program,
             under_dashed_program,
+            rounded_background_program,
         ];
         Ok(Self { vao, vbo, programs, vertices: Default::default() })
     }
@@ -335,13 +337,13 @@ impl RectRenderer {
             gl::BindBuffer(gl::ARRAY_BUFFER, self.vbo);
         }
 
-        let half_width = size_info.width() / 2.;
-        let half_height = size_info.height() / 2.;
+        let center_x = size_info.width() / 2.;
+        let center_y = size_info.height() / 2.;
 
         // Build rect vertices vector.
         self.vertices.iter_mut().for_each(|vertices| vertices.clear());
         for rect in &rects {
-            Self::add_rect(&mut self.vertices[rect.kind as usize], half_width, half_height, rect);
+            Self::add_rect(&mut self.vertices[rect.kind as usize], center_x, center_y, rect);
         }
 
         unsafe {
@@ -378,13 +380,13 @@ impl RectRenderer {
         }
     }
 
-    fn add_rect(vertices: &mut Vec<Vertex>, half_width: f32, half_height: f32, rect: &RenderRect) {
+    fn add_rect(vertices: &mut Vec<Vertex>, center_x: f32, center_y: f32, rect: &RenderRect) {
         // Calculate rectangle vertices positions in normalized device coordinates.
         // NDC range from -1 to +1, with Y pointing up.
-        let x = rect.x / half_width - 1.0;
-        let y = -rect.y / half_height + 1.0;
-        let width = rect.width / half_width;
-        let height = rect.height / half_height;
+        let x = rect.x / center_x - 1.0;
+        let y = -rect.y / center_y + 1.0;
+        let width = rect.width / center_x;
+        let height = rect.height / center_y;
         let (r, g, b) = rect.color.as_tuple();
         let a = (rect.alpha * 255.) as u8;
 
@@ -447,9 +449,8 @@ impl RectShaderProgram {
     pub fn new(shader_version: ShaderVersion, kind: RectKind) -> Result<Self, ShaderError> {
         // XXX: This must be in-sync with fragment shader defines.
         let header = match kind {
-            RectKind::Background => Some("#define DRAW_BACKGROUND\n"),
-            // RectKind::Undercurl => Some("#define DRAW_UNDER_CURL\n"),
-            RectKind::Undercurl => Some("#define DRAW_BACKGROUND\n"),
+            RectKind::RoundedBg => Some("#define DRAW_ROUNDED_BACKGROUND\n"),
+             RectKind::Undercurl => Some("#define DRAW_UNDER_CURL\n"),
             RectKind::UnderDotted => Some("#define DRAW_UNDER_DOTTED\n"),
             RectKind::UnderDashed => Some("#define DRAW_UNDER_DASHED\n"),
             _ => None,

@@ -132,6 +132,27 @@ void main() {
   }
 #elif defined(DRAW_UNDER_DASHED)
   FRAG_COLOR = draw_under_dashed(x);
+#elif defined(DRAW_ROUNDED_BACKGROUND)
+  float_t a = cellWidth / 2.0;
+  float_t b = cellHeight / 2.1;
+  float_t c = b * 0.3;
+  float_t offset = cellHeight * 0.01;
+  FRAG_COLOR = vec4(
+        color.rgb,
+        clamp(
+            (
+                (
+                  ((length(vec2(max(abs(x - a) - a + c, 0), max(abs(y - b) - b + c, 0))) < c) ? 1.0 : 0)
+                  + ((length(vec2(max(abs(x - a) - a + c, 0), max(abs(y + offset - b) - b + c, 0))) < c) ? 1.0 : 0.0)
+                  + ((length(vec2(max(abs(x + offset - a) - a + c, 0), max(abs(y - b) - b + c, 0))) < c) ? 1.0 : 0.0)
+                  + ((length(vec2(max(abs(x + offset - a) - a + c, 0), max(abs(y + offset - b) - b + c, 0))) < c) ? 1.0 : 0.0)
+                )
+                / 4.0
+            ),
+            0.0,
+            1.0
+        )
+    );
 #else
   FRAG_COLOR = color;
 #endif

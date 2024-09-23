@@ -834,7 +834,7 @@ impl Display {
                     lines.rects(&metrics, &size_info)
                         .iter()
                         .filter(|rect| {
-                            rect.kind == RectKind::Undercurl
+                            rect.kind == RectKind::RoundedBg
                         })
                         .map(|&rect| rect)
                         .collect()
@@ -928,7 +928,7 @@ impl Display {
         }
 
         // Draw rectangles.
-        // self.renderer.draw_rects(&size_info, &metrics, rects);
+         self.renderer.draw_rects(&size_info, &metrics, rects);
 
         // Print error or warning message to screen.
         if let Some(message) = message_buffer.message() {
