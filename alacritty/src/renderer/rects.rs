@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::mem;
 
 use ahash::RandomState;
+use bitflags::bitflags;
 use crossfont::Metrics;
 use log::info;
 
@@ -23,14 +24,18 @@ pub struct RenderRect {
     pub y: f32,
     pub width: f32,
     pub height: f32,
+
     pub color: Rgb,
     pub alpha: f32,
+
     pub kind: RectKind,
+
+    pub corner_flags: RoundCornerFlags,
 }
 
 impl RenderRect {
     pub fn new(x: f32, y: f32, width: f32, height: f32, color: Rgb, alpha: f32) -> Self {
-        RenderRect { kind: RectKind::Underline, x, y, width, height, color, alpha }
+        RenderRect { x, y, width, height, color, alpha, kind: RectKind::Underline, corner_flags: RoundCornerFlags::empty() }
     }
 }
 
@@ -39,6 +44,17 @@ pub struct RenderLine {
     pub start: Point<usize>,
     pub end: Point<usize>,
     pub color: Rgb,
+}
+
+
+bitflags! {
+    #[derive(Copy, Clone, Debug, PartialEq, Eq)]
+    pub struct RoundCornerFlags: u32 {
+        const TOP_RIGHT    = 0b0000_0001;
+        const TOP_LEFT     = 0b0000_0100;
+        const BOTTOM_LEFT  = 0b0001_0000;
+        const BOTTOM_RIGHT = 0b0100_0000;
+    }
 }
 
 // NOTE: These flags must be in sync with their usage in the rect.*.glsl shaders.
@@ -54,17 +70,60 @@ pub enum RectKind {
 }
 
 impl RenderLine {
-    pub fn rects(&self, flag: Flags, metrics: &Metrics, size: &SizeInfo) -> Vec<RenderRect> {
+    pub fn rects(&self, flag:Flags, metrics: &Metrics, size: &SizeInfo) -> Vec<RenderRect> {
+
         let mut rects = Vec::new();
 
-        let mut start = self.start;
-        while start.line < self.end.line {
-            let end = Point::new(start.line, size.last_column());
-            Self::push_rects(&mut rects, metrics, size, flag, start, end, self.color);
-            start = Point::new(start.line + 1, Column(0));
-        }
-        Self::push_rects(&mut rects, metrics, size, flag, start, self.end, self.color);
+        Self::push_rects(&mut rects, metrics, size, flag, self.start, self.end, self.color);
 
+        //let mut start = self.start;
+        //while start.line < self.end.line {
+        //    let end = Point::new(start.line, size.last_column());
+        //    Self::push_rects(&mut rects, metrics, size, flag, start, end, self.color);
+        //    start = Point::new(start.line + 1, Column(0));
+        //}
+        //Self::push_rects(&mut rects, metrics, size, flag, start, self.end, self.color);
+
+        rects
+    }
+
+    pub fn round_rects(&self, mut rects: Vec<RenderRect>, flag: Flags, metrics: &Metrics, size: &SizeInfo) -> Vec<RenderRect> {
+        let mut new_rects = Vec::new();
+
+        Self::push_rects(&mut new_rects, metrics, size, flag, self.start, self.end, self.color);
+
+        if let Some(prev_rect) = rects.last_mut() {
+            if let Some(new_rect) = new_rects.last_mut() {
+                if new_rect.kind == RectKind::RoundedBg
+                && prev_rect.kind == RectKind::RoundedBg
+                && new_rect.color  == prev_rect.color
+                && new_rect.y == prev_rect.y + prev_rect.height {
+                    if new_rect.x < prev_rect.x {
+                        prev_rect.corner_flags &= !RoundCornerFlags::BOTTOM_LEFT;
+                    }
+                    else if new_rect.x > prev_rect.x {
+                        new_rect.corner_flags &= !RoundCornerFlags::TOP_LEFT;
+                    }
+                    else {
+                        prev_rect.corner_flags &= !RoundCornerFlags::BOTTOM_LEFT;
+                        new_rect.corner_flags &= !RoundCornerFlags::TOP_LEFT;
+                    }
+
+                    if new_rect.x + new_rect.width > prev_rect.x + prev_rect.width {
+                        prev_rect.corner_flags &= !RoundCornerFlags::BOTTOM_RIGHT;
+                    }
+                    else if new_rect.x + new_rect.width < prev_rect.x + prev_rect.width {
+                        new_rect.corner_flags &= !RoundCornerFlags::TOP_RIGHT;
+                    }
+                    else {
+                        prev_rect.corner_flags &= !RoundCornerFlags::BOTTOM_RIGHT;
+                        new_rect.corner_flags &= !RoundCornerFlags::TOP_RIGHT;
+                    }
+                }
+            }
+        }
+
+        rects.extend(new_rects.into_iter());
         rects
     }
 
@@ -78,7 +137,7 @@ impl RenderLine {
         end: Point<usize>,
         color: Rgb,
     ) {
-        let (position, thickness, ty) = match flag {
+        let (position, thickness, rect_kind, corner_flags) = match flag {
             Flags::DOUBLE_UNDERLINE => {
                 // Position underlines so each one has 50% of descent available.
                 let top_pos = 0.25 * metrics.descent;
@@ -92,32 +151,32 @@ impl RenderLine {
                     top_pos,
                     metrics.underline_thickness,
                     color,
+                    RectKind::Underline,
+                    RoundCornerFlags::empty()
                 ));
 
-                (bottom_pos, metrics.underline_thickness, RectKind::Underline)
+                (bottom_pos, metrics.underline_thickness, RectKind::Underline, RoundCornerFlags::empty())
             },
             // Make undercurl occupy the entire descent area.
-            Flags::UNDERCURL => (metrics.descent, metrics.descent.abs(), RectKind::Undercurl),
+            Flags::UNDERCURL => (metrics.descent, metrics.descent.abs(), RectKind::Undercurl, RoundCornerFlags::empty()),
             Flags::UNDERLINE => {
-                (metrics.underline_position, metrics.underline_thickness, RectKind::Underline)
+                (metrics.underline_position, metrics.underline_thickness, RectKind::Underline, RoundCornerFlags::empty())
             },
             // Make dotted occupy the entire descent area.
             Flags::DOTTED_UNDERLINE => {
-                (metrics.descent, metrics.descent.abs(), RectKind::UnderDotted)
+                (metrics.descent, metrics.descent.abs(), RectKind::UnderDotted, RoundCornerFlags::empty())
             },
             Flags::DASHED_UNDERLINE => {
-                (metrics.underline_position, metrics.underline_thickness, RectKind::UnderDashed)
+                (metrics.underline_position, metrics.underline_thickness, RectKind::UnderDashed, RoundCornerFlags::empty())
             },
             Flags::STRIKEOUT => {
-                (metrics.strikeout_position, metrics.strikeout_thickness, RectKind::Underline)
+                (metrics.strikeout_position, metrics.strikeout_thickness, RectKind::Underline, RoundCornerFlags::empty())
             },
-            Flags::ROUNDED_BACKGROUND => (metrics.descent, size.cell_height(), RectKind::RoundedBg),
+            Flags::ROUNDED_BACKGROUND => (metrics.descent, size.cell_height(), RectKind::RoundedBg, RoundCornerFlags::all()),
             _ => unimplemented!("Invalid flag for cell line drawing specified"),
         };
 
-        let mut rect =
-            Self::create_rect(size, metrics.descent, start, end, position, thickness, color);
-        rect.kind = ty;
+        let rect = Self::create_rect(size, metrics.descent, start, end, position, thickness, color, rect_kind, corner_flags);
         rects.push(rect);
     }
 
@@ -130,6 +189,8 @@ impl RenderLine {
         position: f32,
         mut thickness: f32,
         color: Rgb,
+        rect_kind: RectKind,
+        corner_flags: RoundCornerFlags
     ) -> RenderRect {
         let start_x = start.column.0 as f32 * size.cell_width();
         let end_x = (end.column.0 + 1) as f32 * size.cell_width();
@@ -147,14 +208,18 @@ impl RenderLine {
             y = max_y;
         }
 
-        RenderRect::new(
+        let mut rect = RenderRect::new(
             start_x + size.padding_x(),
             y + size.padding_y(),
             width,
             thickness,
             color,
-            1.,
-        )
+            1.
+        );
+        rect.kind = rect_kind;
+        rect.corner_flags = corner_flags;
+
+        rect
     }
 }
 
@@ -175,7 +240,12 @@ impl RenderLines {
         self.inner
             .iter()
             .flat_map(|(flag, lines)| {
-                lines.iter().flat_map(move |line| line.rects(*flag, metrics, size))
+                lines
+                    .iter()
+                    .fold(
+                        Vec::new(),
+                        move |rects, line| line.round_rects(rects, *flag, metrics, size)
+                    )
             })
             .collect()
     }
@@ -236,10 +306,14 @@ static RECT_SHADER_V: &str = include_str!("../../res/rect.v.glsl");
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
-struct Vertex {
+pub struct Vertex {
     // Normalized screen coordinates.
     x: f32,
     y: f32,
+    width: f32,
+
+    // Round Corner Flags
+    corner_flags: RoundCornerFlags,
 
     // Color.
     r: u8,
@@ -293,25 +367,37 @@ impl RectRenderer {
             // Position.
             gl::VertexAttribPointer(
                 0,
-                2,
+                3,
                 gl::FLOAT,
                 gl::FALSE,
                 mem::size_of::<Vertex>() as i32,
                 attribute_offset as *const _,
             );
             gl::EnableVertexAttribArray(0);
-            attribute_offset += mem::size_of::<f32>() * 2;
+            attribute_offset += mem::size_of::<f32>() * 3;
+
+            // Corner flags.
+            gl::VertexAttribPointer(
+                1,
+                4,
+                gl::UNSIGNED_BYTE,
+                gl::FALSE,
+                mem::size_of::<Vertex>() as i32,
+                attribute_offset as *const _,
+            );
+            gl::EnableVertexAttribArray(1);
+            attribute_offset += mem::size_of::<RoundCornerFlags>();
 
             // Color.
             gl::VertexAttribPointer(
-                1,
+                2,
                 4,
                 gl::UNSIGNED_BYTE,
                 gl::TRUE,
                 mem::size_of::<Vertex>() as i32,
                 attribute_offset as *const _,
             );
-            gl::EnableVertexAttribArray(1);
+            gl::EnableVertexAttribArray(2);
 
             // Reset buffer bindings.
             gl::BindVertexArray(0);
@@ -392,18 +478,19 @@ impl RectRenderer {
 
         // Make quad vertices.
         let quad = [
-            Vertex { x, y, r, g, b, a },
-            Vertex { x, y: y - height, r, g, b, a },
-            Vertex { x: x + width, y, r, g, b, a },
-            Vertex { x: x + width, y: y - height, r, g, b, a },
+            Vertex { x, y, width: rect.width, r, g, b, a, corner_flags: rect.corner_flags },
+            Vertex { x, y: y - height, width: rect.width, r, g, b, a, corner_flags: rect.corner_flags },
+            Vertex { x: x + width, y, width: rect.width, r, g, b, a, corner_flags: rect.corner_flags },
+            Vertex { x: x + width, y: y - height, width: rect.width, r, g, b, a, corner_flags: rect.corner_flags },
         ];
 
         // Append the vertices to form two triangles.
-        vertices.push(quad[0]);
         vertices.push(quad[1]);
         vertices.push(quad[2]);
-        vertices.push(quad[2]);
+        vertices.push(quad[0]);
+
         vertices.push(quad[3]);
+        vertices.push(quad[2]);
         vertices.push(quad[1]);
     }
 }
@@ -488,11 +575,11 @@ impl RectShaderProgram {
             if let Some(u_cell_height) = self.u_cell_height {
                 gl::Uniform1f(u_cell_height, size_info.cell_height());
             }
+            if let Some(u_padding_x) = self.u_padding_x {
+                gl::Uniform1f(u_padding_x, size_info.width());
+            }
             if let Some(u_padding_y) = self.u_padding_y {
                 gl::Uniform1f(u_padding_y, padding_y);
-            }
-            if let Some(u_padding_x) = self.u_padding_x {
-                gl::Uniform1f(u_padding_x, size_info.padding_x());
             }
             if let Some(u_underline_position) = self.u_underline_position {
                 gl::Uniform1f(u_underline_position, underline_position);

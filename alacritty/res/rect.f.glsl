@@ -13,13 +13,18 @@ out vec4 FragColor;
 #define FRAG_COLOR FragColor
 
 flat in color_t color;
+flat in vec2 rectPosition;
+flat in float rectWidth;
+flat in uint cornerFlags;
 
 #endif
 
 uniform float_t cellWidth;
 uniform float_t cellHeight;
-uniform float_t paddingY;
 uniform float_t paddingX;
+uniform float_t paddingY;
+uniform float_t rectX;
+uniform float_t rectY;
 
 uniform float_t underlinePosition;
 uniform float_t underlineThickness;
@@ -119,8 +124,8 @@ color_t draw_under_dashed(float_t x) {
 #endif
 
 void main() {
-  float_t x = floor(mod(gl_FragCoord.x - paddingX, cellWidth));
-  float_t y = floor(mod(gl_FragCoord.y - paddingY, cellHeight));
+  float_t x = gl_FragCoord.x - (rectPosition.x + 1) * paddingX / 2;
+  float_t y = mod(gl_FragCoord.y - paddingY, cellHeight);
 
 #if defined(DRAW_UNDER_CURL)
   FRAG_COLOR = draw_under_curl(x, y);
@@ -132,27 +137,45 @@ void main() {
   }
 #elif defined(DRAW_UNDER_DASHED)
   FRAG_COLOR = draw_under_dashed(x);
+
 #elif defined(DRAW_ROUNDED_BACKGROUND)
-  float_t a = cellWidth / 2.0;
-  float_t b = cellHeight / 2.1;
-  float_t c = b * 0.3;
-  float_t offset = cellHeight * 0.01;
-  FRAG_COLOR = vec4(
-        color.rgb,
-        clamp(
-            (
-                (
-                  ((length(vec2(max(abs(x - a) - a + c, 0), max(abs(y - b) - b + c, 0))) < c) ? 1.0 : 0)
-                  + ((length(vec2(max(abs(x - a) - a + c, 0), max(abs(y + offset - b) - b + c, 0))) < c) ? 1.0 : 0.0)
-                  + ((length(vec2(max(abs(x + offset - a) - a + c, 0), max(abs(y - b) - b + c, 0))) < c) ? 1.0 : 0.0)
-                  + ((length(vec2(max(abs(x + offset - a) - a + c, 0), max(abs(y + offset - b) - b + c, 0))) < c) ? 1.0 : 0.0)
-                )
-                / 4.0
-            ),
-            0.0,
-            1.0
-        )
-    );
+  float_t a = rectWidth / 2.0;
+  float_t b = cellHeight / 2.0;
+  float_t c = b * 0.35;
+
+  bool render_corner = false;
+
+  if (((cornerFlags & uint(1)) != uint(0)) && x >= rectWidth - c && y >= cellHeight - c) {
+    render_corner = true;
+  }
+  else if (((cornerFlags & uint(4)) != uint(0)) && x <= c && y >= cellHeight - c) {
+    render_corner = true;
+  }
+  else if (((cornerFlags & uint(16)) != uint(0)) && x <= c && y <= c) {
+    render_corner = true;
+  }
+  else if (((cornerFlags & uint(64)) != uint(0)) && x >= rectWidth - c && y <= c) {
+    render_corner = true;
+  }
+
+  float_t alpha = 1.0;
+  float_t softness = 0.6;
+
+  if (render_corner) {
+    alpha = smoothstep(softness, -softness, length(vec2(max(abs(x - a) - a + c, 0), max(abs(y - b) - b + c, 0))) - c);
+  }
+
+  // if (render_corner) {
+  //   alpha = (
+  //       ((length(vec2(max(abs(x - offset - a) - a + c, 0), max(abs(y - offset - b) - b + c, 0))) < c) ? 1.0 : 0.0)
+  //     + ((length(vec2(max(abs(x - offset - a) - a + c, 0), max(abs(y + offset - b) - b + c, 0))) < c) ? 1.0 : 0.0)
+  //     + ((length(vec2(max(abs(x + offset - a) - a + c, 0), max(abs(y - offset - b) - b + c, 0))) < c) ? 1.0 : 0.0)
+  //     + ((length(vec2(max(abs(x + offset - a) - a + c, 0), max(abs(y + offset - b) - b + c, 0))) < c) ? 1.0 : 0.0)
+  //   ) / 4.0;
+  // }
+
+  FRAG_COLOR = vec4(color.rgb, alpha);
+
 #else
   FRAG_COLOR = color;
 #endif
