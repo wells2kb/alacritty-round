@@ -16,10 +16,16 @@ flat in color_t color;
 
 #endif
 
+flat in vec2 rectPosition;
+flat in float rectWidth;
+flat in uint cornerFlags;
+
 uniform float_t cellWidth;
 uniform float_t cellHeight;
-uniform float_t paddingY;
 uniform float_t paddingX;
+uniform float_t paddingY;
+uniform float_t rectX;
+uniform float_t rectY;
 
 uniform float_t underlinePosition;
 uniform float_t underlineThickness;
@@ -28,8 +34,8 @@ uniform float_t undercurlPosition;
 
 #define PI 3.1415926538
 
-#if defined(DRAW_UNDERCURL)
-color_t draw_undercurl(float_t x, float_t y) {
+#if defined(DRAW_UNDER_CURL)
+color_t draw_under_curl(float_t x, float_t y) {
   // We use `undercurlPosition` as an amplitude, since it's half of the descent
   // value.
   //
@@ -58,10 +64,10 @@ color_t draw_undercurl(float_t x, float_t y) {
 }
 #endif
 
-#if defined(DRAW_DOTTED)
+#if defined(DRAW_UNDER_DOTTED)
 // When the dot size increases we can use AA to make spacing look even and the
 // dots rounded.
-color_t draw_dotted_aliased(float_t x, float_t y) {
+color_t draw_under_dotted_aliased(float_t x, float_t y) {
   float_t dotNumber = floor(x / underlineThickness);
 
   float_t radius = underlineThickness / 2.;
@@ -78,7 +84,7 @@ color_t draw_dotted_aliased(float_t x, float_t y) {
 }
 
 /// Draw dotted line when dot is just a single pixel.
-color_t draw_dotted(float_t x, float_t y) {
+color_t draw_under_dotted(float_t x, float_t y) {
   float_t cellEven = 0.;
 
   // Since the size of the dot and its gap combined is 2px we should ensure that
@@ -101,8 +107,8 @@ color_t draw_dotted(float_t x, float_t y) {
 }
 #endif
 
-#if defined(DRAW_DASHED)
-color_t draw_dashed(float_t x) {
+#if defined(DRAW_UNDER_DASHED)
+color_t draw_under_dashed(float_t x) {
   // Since dashes of adjacent cells connect with each other our dash length is
   // half of the desired total length.
   float_t halfDashLen = floor(cellWidth / 4. + 0.5);
@@ -119,19 +125,70 @@ color_t draw_dashed(float_t x) {
 #endif
 
 void main() {
-  float_t x = floor(mod(gl_FragCoord.x - paddingX, cellWidth));
-  float_t y = floor(mod(gl_FragCoord.y - paddingY, cellHeight));
+  float_t x = gl_FragCoord.x - (rectPosition.x + 1) * paddingX / 2;
+  float_t y = mod(gl_FragCoord.y - paddingY, cellHeight);
 
-#if defined(DRAW_UNDERCURL)
-  FRAG_COLOR = draw_undercurl(x, y);
-#elif defined(DRAW_DOTTED)
+#if defined(DRAW_UNDER_CURL)
+  FRAG_COLOR = draw_under_curl(x, y);
+#elif defined(DRAW_UNDER_DOTTED)
   if (underlineThickness < 2.) {
-    FRAG_COLOR = draw_dotted(x, y);
+    FRAG_COLOR = draw_under_dotted(x, y);
   } else {
-    FRAG_COLOR = draw_dotted_aliased(x, y);
+    FRAG_COLOR = draw_under_dotted_aliased(x, y);
   }
-#elif defined(DRAW_DASHED)
-  FRAG_COLOR = draw_dashed(x);
+#elif defined(DRAW_UNDER_DASHED)
+  FRAG_COLOR = draw_under_dashed(x);
+
+#elif defined(DRAW_ROUND_BACKGROUND)
+  float_t a = rectWidth / 2.0;
+  float_t b = cellHeight / 2.0;
+  float_t c = b * 0.5;
+
+  bool render_corner = false;
+  bool inner_corner = false;
+
+  if (((cornerFlags & uint(1)) != uint(0)) && x >= rectWidth - c && y >= cellHeight - c) {
+    render_corner = true;
+    if ((cornerFlags & uint(3)) == uint(3)) {
+        inner_corner = true;
+    }
+  }
+  else if (((cornerFlags & uint(4)) != uint(0)) && x <= c && y >= cellHeight - c) {
+    render_corner = true;
+    if ((cornerFlags & uint(12)) == uint(12)) {
+        inner_corner = true;
+    }
+  }
+  else if (((cornerFlags & uint(16)) != uint(0)) && x <= c && y <= c) {
+    render_corner = true;
+    if ((cornerFlags & uint(48)) == uint(48)) {
+        inner_corner = true;
+    }
+  }
+  else if (((cornerFlags & uint(64)) != uint(0)) && x >= rectWidth - c && y <= c) {
+    render_corner = true;
+    if ((cornerFlags & uint(192)) == uint(192)) {
+        inner_corner = true;
+    }
+  }
+
+  float_t alpha = 0.0;
+  float_t softness = 0.6;
+
+  if (render_corner) {
+    if (inner_corner) {
+     alpha = smoothstep(softness, -softness, c - length(vec2(min(abs(x - a) - a - c, 0), max(abs(y - b) - b + c, 0))));
+    }
+    else {
+      alpha = smoothstep(softness, -softness, length(vec2(max(abs(x - a) - a + c, 0), max(abs(y - b) - b + c, 0))) - c);
+    }
+  }
+  else {
+    alpha = (0 <= x && x <= rectWidth) ? 1.0 : 0.0;
+  }
+
+  FRAG_COLOR = vec4(color.rgb, alpha);
+
 #else
   FRAG_COLOR = color;
 #endif

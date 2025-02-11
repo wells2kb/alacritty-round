@@ -1924,6 +1924,10 @@ impl<T: EventListener> Handler for Term<T> {
             Attr::CancelHidden => cursor.template.flags.remove(Flags::HIDDEN),
             Attr::Strike => cursor.template.flags.insert(Flags::STRIKEOUT),
             Attr::CancelStrike => cursor.template.flags.remove(Flags::STRIKEOUT),
+            Attr::RoundBackground => {
+                cursor.template.flags.remove(Flags::ALL_UNDERLINES);
+                cursor.template.flags.insert(Flags::ROUND_BACKGROUND);
+            },
             _ => {
                 debug!("Term got unhandled attr: {:?}", attr);
             },

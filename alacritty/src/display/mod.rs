@@ -842,7 +842,7 @@ impl Display {
         let has_highlighted_hint =
             self.highlighted_hint.is_some() || self.vi_highlighted_hint.is_some();
 
-        // Draw grid.
+        // Draw text grid and collect render lines.
         {
             let _sampler = self.meter.sampler();
 
@@ -855,8 +855,12 @@ impl Display {
             let vi_highlighted_hint = &self.vi_highlighted_hint;
             let damage_tracker = &mut self.damage_tracker;
 
+            // Split out any lines that need to be rendered behind text.
+            let mut background_lines = RenderLines::new();
+
             let cells = grid_cells.into_iter().map(|mut cell| {
                 // Underline hints hovered by mouse or vi mode cursor.
+
                 if has_highlighted_hint {
                     let point = term::viewport_to_point(display_offset, cell.point);
                     let hyperlink = cell.extra.as_ref().and_then(|extra| extra.hyperlink.as_ref());
@@ -870,12 +874,25 @@ impl Display {
                     }
                 }
 
-                // Update underline/strikeout.
-                lines.update(&cell);
+                // Update underlines, strikeouts, round backgrounds.
+                if cell.flags == Flags::ROUND_BACKGROUND {
+                    background_lines.update(&cell);
+                }
+                else {
+                    lines.update(&cell);
+                }
 
                 cell
-            });
-            self.renderer.draw_cells(&size_info, glyph_cache, cells);
+            }).collect::<Vec<_>>();
+
+            // Render background lines before text.
+            self.renderer.draw_rects(&size_info, &metrics, background_lines.rects(&metrics, &size_info));
+
+            self.renderer.draw_cells(
+                &size_info,
+                glyph_cache,
+                cells.into_iter(),
+            );
         }
 
         let mut rects = lines.rects(&metrics, &size_info);
@@ -961,6 +978,7 @@ impl Display {
             }
         }
 
+        // Print error or warning message to screen.
         if let Some(message) = message_buffer.message() {
             let search_offset = usize::from(search_state.regex().is_some());
             let text = message.text(&size_info);
@@ -1184,8 +1202,8 @@ impl Display {
         }
 
         // Add underline for preedit text.
-        let underline = RenderLine { start, end, color: fg };
-        rects.extend(underline.rects(Flags::UNDERLINE, &metrics, &self.size_info));
+        let underline = RenderLine{ start, end, color: fg }.to_rect(rects, &metrics, &self.size_info, Flags::UNDERLINE);
+        rects.push(underline);
 
         let ime_popup_point = match preedit.cursor_end_offset {
             Some(cursor_end_offset) => {
